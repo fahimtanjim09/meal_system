@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MessFlow Pro | Auto Rate Calculation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="index1.css">
+</head>
+<body>
+
+    <div class="app-shell">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="brand">
+                <i class="fas fa-cubes"></i> MessFlow Pro
+            </div>
+            
+            <!-- Manager Navigation -->
+            <ul class="nav-links" id="nav-links">
+                <li class="nav-item active" onclick="router('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</li>
+                <li class="nav-item" onclick="router('members')"><i class="fas fa-users"></i> Members</li>
+                <li class="nav-item" onclick="router('meals')"><i class="fas fa-utensils"></i> Meals</li>
+                <li class="nav-item" onclick="router('expenses')"><i class="fas fa-file-invoice-dollar"></i> Expenses</li>
+                <li class="nav-item" onclick="router('payments')"><i class="fas fa-wallet"></i> Payments</li>
+            </ul>
+
+            <div class="user-profile">
+                <div style="width: 32px; height: 32px; background: var(--accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">A</div>
+                <div>
+                    <div style="font-size: 0.85rem; font-weight: 600;" id="current-user-name">Admin</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8;">Manager</div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="main-content">
+            <!-- Top Header -->
+            <header class="top-bar">
+                <button class="btn btn-outline btn-sm no-print" onclick="toggleSidebar()" style="margin-right: 1rem;"><i class="fas fa-bars"></i></button>
+                <h2 style="font-size: 1.1rem; font-weight: 600;" id="page-title">Dashboard</h2>
+                
+                <div class="role-switcher">
+                    <label style="font-size: 0.8rem; margin-right: 0.5rem; color: var(--text-muted);">View Mode:</label>
+                    <select id="role-select" onchange="handleRoleChange()">
+                        <option value="manager">Manager</option>
+                        <option value="" disabled>-- Select Member --</option>
+                    </select>
+                </div>
+            </header>
+
+            <div class="content-area" id="main-view">
+                <!-- Content Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="generic-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Title</h3>
+                <button class="btn btn-outline btn-sm" onclick="closeModal('generic-modal')"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        /**
+         * MessFlow Pro - Auto Rate Calculation System
+         * Meal Rate = (Total Groceries Expense) / (Total Meals Consumed)
+         */
+
+        const STORAGE_KEY = 'messFlow_auto_v1';
+        
+        // Initial State
+        const initialState = {
+            members: [
+                { id: 'm1', name: 'Rahim Uddin', type: 'Student', joined: '2023-10-01' },
+                { id: 'm2', name: 'Karim Ali', type: 'Student', joined: '2023-10-01' }
+            ],
+            expenses: [
+                { id: 'e1', date: '2023-10-01', category: 'Rent', desc: 'Monthly House Rent', amount: 5000 },
+                { id: 'e2', date: '2023-10-05', category: 'Groceries', desc: 'Rice, Dal, Oil', amount: 2000 }
+            ],
+            payments: [],
+            meals: {}, 
+            settings: { 
+                currency: 'Tk'
+            }
+        };
+
+        let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || initialState;
+        let currentUserRole = 'manager';
+        let viewingMemberId = null; 
+
+        // --- Core Functions ---
+
+        function saveState() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            render();
+        }
+
+        function formatCurrency(amount) {
+            return state.settings.currency + ' ' + parseFloat(amount).toFixed(2);
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.style.borderLeft = `4px solid ${type === 'success' ? '#10b981' : '#ef4444'}`;
+            toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> ${message}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // --- Routing & View Logic ---
+
+        function router(viewName, memberId = null) {
+            currentView = viewName;
+            viewingMemberId = memberId; 
+
+            const titleMap = {
+                'dashboard': 'Overview Dashboard',
+                'members': 'Member Management',
+                'meals': 'Daily Meal Entry',
+                'expenses': 'Expense Tracking',
+                'payments': 'Payment Collections',
+                'member-profile': 'Member Financial Profile'
+            };
+            document.getElementById('page-title').innerText = titleMap[viewName] || 'MessFlow';
+            
+            // Update Sidebar Active State
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            const navLink = document.querySelector(`.nav-item[onclick="router('${viewName}')"]`);
+            if(navLink) navLink.classList.add('active');
+
+            if(viewName === 'member-profile') {
+                 document.getElementById('nav-links').style.display = 'none';
+            } else if(currentUserRole === 'manager') {
+                 document.getElementById('nav-links').style.display = 'block';
+            }
+
+            render();
+        }
+
+        function handleRoleChange() {
+            const select = document.getElementById('role-select');
+            currentUserRole = select.value;
+
+            if (currentUserRole === 'manager') {
+                document.getElementById('nav-links').style.display = 'block';
+                router('dashboard');
+            } else {
+                viewingMemberId = currentUserRole;
+                document.getElementById('nav-links').style.display = 'none';
+                router('member-profile', currentUserRole);
+            }
+        }
+
+        // --- Render Functions ---
+
+        function render() {
+            const container = document.getElementById('main-view');
+            container.innerHTML = '';
+
+            if (currentUserRole === 'manager') {
+                if (currentView === 'dashboard') renderDashboard(container);
+                else if (currentView === 'members') renderMembers(container);
+                else if (currentView === 'meals') renderMeals(container);
+                else if (currentView === 'expenses') renderExpenses(container);
+                else if (currentView === 'payments') renderPayments(container);
+                else if (currentView === 'member-profile' && viewingMemberId) renderMemberProfile(container, viewingMemberId);
+            } else {
+                renderMemberProfile(container, currentUserRole);
+            }
+        }
+
+        // 1. Dashboard
+        function renderDashboard(container) {
+            const fin = calculateFinancials();
+            const totalExp = state.expenses.reduce((a, b) => a + b.amount, 0);
+            const totalPaid = state.payments.reduce((a, b) => a + b.amount, 0);
+
+            container.innerHTML = `
+                <div class="grid-4">
+                    <div class="card stat-card">
+                        <h3>Active Members</h3>
+                        <div class="value">${state.members.length}</div>
+                    </div>
+                    <div class="card stat-card" style="border-color: var(--accent);">
+                        <h3 style="color:var(--accent)">Current Meal Rate</h3>
+                        <div class="value">${formatCurrency(fin.mealRate)}</div>
+                        <div style="font-size:0.8rem; margin-top:0.5rem; color:var(--text-muted)">
+                            (Calculated from Groceries)
+                        </div>
+                    </div>
+                    <div class="card stat-card">
+                        <h3>Total Expenses</h3>
+                        <div class="value" style="color: var(--danger)">${formatCurrency(totalExp)}</div>
+                    </div>
+                    <div class="card stat-card">
+                        <h3>Total Collected</h3>
+                        <div class="value" style="color: var(--success)">${formatCurrency(totalPaid)}</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:1rem;">
+                        <h3>Recent Transactions</h3>
+                        <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead>
+                            <tbody>
+                                ${state.expenses.sort((a,b) => new Date(b.date)-new Date(a.date)).slice(0,3).map(e => `
+                                    <tr><td>${e.date}</td><td><span class="badge badge-warning">Exp</span></td><td>${e.desc}</td><td>${formatCurrency(e.amount)}</td></tr>
+                                `).join('')}
+                                ${state.payments.sort((a,b) => new Date(b.date)-new Date(a.date)).slice(0,3).map(p => {
+                                     const m = state.members.find(x => x.id === p.memberId);
+                                     return `<tr><td>${p.date}</td><td><span class="badge badge-success">Pay</span></td><td>${m ? m.name : 'Unknown'}</td><td style="color:var(--success)">+${formatCurrency(p.amount)}</td></tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 2. Members
+        function renderMembers(container) {
+            container.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                        <h3>Member Directory</h3>
+                        <button class="btn btn-primary" onclick="openMemberModal()">+ Add Member</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Profile</th><th>Type</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                ${state.members.map(m => `
+                                    <tr>
+                                        <td><div style="font-weight:600">${m.name}</div></td>
+                                        <td>${m.type}</td>
+                                        <td>
+                                            <button class="btn btn-outline btn-sm" onclick="router('member-profile', '${m.id}')"><i class="fas fa-eye"></i> View Profile</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteMember('${m.id}')"><i class="fas fa-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 3. Member Profile
+        function renderMemberProfile(container, memberId) {
+            const member = state.members.find(m => m.id === memberId);
+            if (!member) return container.innerHTML = '<div class="card"><h3>Member not found</h3></div>';
+
+            const fin = calculateFinancials();
+            
+            // --- Calculations ---
+            const memberMeals = getMemberMealCount(memberId);
+            const mealCost = memberMeals * fin.mealRate;
+            const fixedCost = fin.fixedPerHead;
+            const totalBill = mealCost + fixedCost;
+            
+            const payments = state.payments.filter(p => p.memberId === memberId);
+            const totalPaid = payments.reduce((a,b)=>a+b.amount, 0);
+            
+            const balance = totalPaid - totalBill;
+
+            // Generate Logs
+            const mealLogRows = Object.keys(state.meals).sort().map(date => {
+                const mLog = state.meals[date][memberId];
+                if(mLog && (mLog.b || mLog.l || mLog.d)) {
+                    const c = (mLog.b?1:0) + (mLog.l?1:0) + (mLog.d?1:0);
+                    return `<tr>
+                        <td>${date}</td>
+                        <td>${c} Meals</td>
+                        <td style="color:var(--danger)">-${formatCurrency(c * fin.mealRate)}</td>
+                    </tr>`;
+                }
+                return '';
+            }).join('');
+
+            const paymentRows = payments.sort((a,b) => new Date(b.date)-new Date(a.date)).map(p => `
+                <tr>
+                    <td>${p.date}</td>
+                    <td>Payment</td>
+                    <td style="color:var(--success)">+${formatCurrency(p.amount)}</td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="no-print" style="margin-bottom:1rem;">
+                    ${currentUserRole === 'manager' ? `<button class="btn btn-outline" onclick="router('members')"><i class="fas fa-arrow-left"></i> Back to List</button>` : ''}
+                    <button class="btn btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+                </div>
+
+                <div class="card">
+                    <div class="profile-header">
+                        <div class="profile-avatar">${member.name.charAt(0)}</div>
+                        <div>
+                            <h2>${member.name}</h2>
+                            <p style="color:var(--text-muted)">${member.type} | Joined: ${member.joined}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div class="card" style="padding:1rem; border-color: var(--success);">
+                            <h3 style="color:var(--success)">Total Paid</h3>
+                            <div class="value" style="font-size:1.5rem;">${formatCurrency(totalPaid)}</div>
+                        </div>
+                        <div class="card" style="padding:1rem; border-color: var(--danger);">
+                            <h3 style="color:var(--danger)">Meal Deduction</h3>
+                            <div class="value" style="font-size:1.5rem;">-${formatCurrency(mealCost)}</div>
+                            <div style="font-size:0.8rem; margin-top:0.25rem;">Based on ${memberMeals} meals</div>
+                        </div>
+                        <div class="card" style="padding:1rem;">
+                            <h3>Fixed Costs</h3>
+                            <div class="value" style="font-size:1.5rem;">${formatCurrency(fixedCost)}</div>
+                        </div>
+                        <div class="card" style="padding:1rem; background:${balance>=0?'#dcfce7':'#fee2e2'}; border:none;">
+                            <h3>Current Balance</h3>
+                            <div class="value" style="font-size:1.5rem;">${formatCurrency(balance)}</div>
+                            <div style="font-size:0.8rem; margin-top:0.25rem; font-weight:600;">
+                                ${balance < 0 ? '⚠️ Due Amount (Negative)' : '✅ Advance Available'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem;">
+                    <div class="card">
+                        <h3 style="margin-bottom:1rem;">Payment History</h3>
+                        <div class="table-container">
+                            <table class="log-table">
+                                <thead><tr><th>Date</th><th>Details</th><th>Amount</th></tr></thead>
+                                <tbody>${paymentRows || '<tr><td colspan="3" style="text-align:center">No payments.</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3 style="margin-bottom:1rem;">Meal Deduction Log</h3>
+                        <div class="table-container">
+                            <table class="log-table">
+                                <thead><tr><th>Date</th><th>Meals</th><th>Cost</th></tr></thead>
+                                <tbody>${mealLogRows || '<tr><td colspan="3" style="text-align:center">No meals.</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 4. Meals
+        function renderMeals(container) {
+            const today = new Date().toISOString().split('T')[0];
+            container.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                        <div>
+                            <h3>Daily Meal Entry</h3>
+                            <input type="date" id="meal-date" value="${today}" onchange="renderMealGrid()" style="padding:0.5rem; border:1px solid var(--border); border-radius:0.5rem;">
+                        </div>
+                        <button class="btn btn-primary" onclick="saveMeals()"><i class="fas fa-save"></i> Save Data</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="meal-grid">
+                            <thead><tr><th>Member Name</th><th style="text-align:center">Breakfast</th><th style="text-align:center">Lunch</th><th style="text-align:center">Dinner</th></tr></thead>
+                            <tbody id="meal-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            renderMealGrid();
+        }
+
+        function renderMealGrid() {
+            const date = document.getElementById('meal-date').value;
+            const dayData = state.meals[date] || {};
+            const tbody = document.getElementById('meal-tbody');
+            tbody.innerHTML = state.members.map(m => {
+                const mLog = dayData[m.id] || {b: false, l: false, d: false};
+                return `
+                    <tr>
+                        <td>${m.name}</td>
+                        <td style="text-align:center"><input type="checkbox" class="m-chk" data-id="${m.id}" data-type="b" ${mLog.b ? 'checked' : ''}></td>
+                        <td style="text-align:center"><input type="checkbox" class="m-chk" data-id="${m.id}" data-type="l" ${mLog.l ? 'checked' : ''}></td>
+                        <td style="text-align:center"><input type="checkbox" class="m-chk" data-id="${m.id}" data-type="d" ${mLog.d ? 'checked' : ''}></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function saveMeals() {
+            const date = document.getElementById('meal-date').value;
+            const newData = {};
+            document.querySelectorAll('.m-chk').forEach(chk => {
+                const mid = chk.dataset.id;
+                const type = chk.dataset.type;
+                if(!newData[mid]) newData[mid] = {b:false, l:false, d:false};
+                newData[mid][type] = chk.checked;
+            });
+            state.meals[date] = newData;
+            saveState();
+            showToast('Meals recorded successfully');
+        }
+
+        // 5. Expenses
+        function renderExpenses(container) {
+            container.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                        <h3>Expense Ledger</h3>
+                        <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Action</th></tr></thead>
+                            <tbody>
+                                ${state.expenses.sort((a,b) => new Date(b.date)-new Date(a.date)).map(e => `
+                                    <tr>
+                                        <td>${e.date}</td>
+                                        <td><span class="badge badge-warning">${e.category}</span></td>
+                                        <td>${e.desc}</td>
+                                        <td style="font-weight:600">${formatCurrency(e.amount)}</td>
+                                        <td><button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')"><i class="fas fa-trash"></i></button></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 6. Payments
+        function renderPayments(container) {
+            container.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                        <h3>Payment Collections</h3>
+                        <button class="btn btn-primary" onclick="openPaymentModal()">+ Record Payment</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Date</th><th>Member</th><th>Amount</th><th>Action</th></tr></thead>
+                            <tbody>
+                                ${state.payments.sort((a,b) => new Date(b.date)-new Date(a.date)).map(p => {
+                                    const m = state.members.find(x => x.id === p.memberId);
+                                    return `
+                                    <tr>
+                                        <td>${p.date}</td>
+                                        <td>${m ? m.name : 'Unknown'}</td>
+                                        <td style="color:var(--success); font-weight:600;">${formatCurrency(p.amount)}</td>
+                                        <td><button class="btn btn-danger btn-sm" onclick="deletePayment('${p.id}')"><i class="fas fa-trash"></i></button></td>
+                                    </tr>
+                                `}).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        // --- Logic Engine ---
+
+        function calculateFinancials() {
+            let totGroceries = 0, totRent = 0, totGas = 0, totUtil = 0;
+            state.expenses.forEach(e => {
+                if(e.category === 'Groceries') totGroceries += e.amount;
+                else if(e.category === 'Rent') totRent += e.amount;
+                else if(e.category === 'Gas') totGas += e.amount;
+                else if(e.category === 'Utilities') totUtil += e.amount;
+            });
+
+            let totalSysMeals = 0;
+            state.members.forEach(m => totalSysMeals += getMemberMealCount(m.id));
+
+            // CRITICAL: Automatic Rate Calculation
+            const mealRate = totalSysMeals > 0 ? totGroceries / totalSysMeals : 0;
+            
+            const fixedPerHead = state.members.length > 0 ? (totRent + totGas + totUtil) / state.members.length : 0;
+
+            return {
+                mealRate: mealRate,
+                fixedPerHead: fixedPerHead
+            };
+        }
+
+        function getMemberMealCount(mid) {
+            let c = 0;
+            Object.values(state.meals).forEach(day => {
+                if(day[mid]) {
+                    if(day[mid].b) c++;
+                    if(day[mid].l) c++;
+                    if(day[mid].d) c++;
+                }
+            });
+            return c;
+        }
+
+        // --- Modals & Forms ---
+
+        function openModal(id, title, html) {
+            document.getElementById(id+' .modal h3').innerText = title;
+            document.getElementById(id+' .modal-body').innerHTML = html;
+            document.getElementById(id).classList.add('open');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('open');
+        }
+
+        function openMemberModal() {
+            document.getElementById('modal-title').innerText = "Add New Member";
+            document.getElementById('modal-body').innerHTML = `
+                <form onsubmit="handleAddMember(event)">
+                    <div class="form-group"><label class="form-label">Name</label><input name="name" class="form-input" required></div>
+                    <div class="form-group"><label class="form-label">Type</label><select name="type" class="form-select"><option>Student</option><option>Staff</option></select></div>
+                    <button type="submit" class="btn btn-primary" style="width:100%">Save</button>
+                </form>
+            `;
+            document.getElementById('generic-modal').classList.add('open');
+        }
+        function handleAddMember(e) {
+            e.preventDefault();
+            state.members.push({ id: Date.now().toString(), name: e.target.name.value, type: e.target.type.value, joined: new Date().toISOString().split('T')[0] });
+            saveState(); closeModal('generic-modal');
+            updateRoleSelect();
+        }
+        function deleteMember(id) {
+            if(confirm('Delete Member?')) { state.members = state.members.filter(m => m.id !== id); saveState(); updateRoleSelect(); }
+        }
+
+        function openExpenseModal() {
+            document.getElementById('modal-title').innerText = "Add Expense";
+            document.getElementById('modal-body').innerHTML = `
+                <form onsubmit="handleAddExpense(event)">
+                    <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" class="form-input" required value="${new Date().toISOString().split('T')[0]}"></div>
+                    <div class="form-group"><label class="form-label">Category</label><select name="category" class="form-select"><option>Groceries</option><option>Rent</option><option>Gas</option><option>Utilities</option></select></div>
+                    <div class="form-group"><label class="form-label">Description</label><input name="desc" class="form-input" required></div>
+                    <div class="form-group"><label class="form-label">Amount</label><input type="number" name="amount" step="0.01" class="form-input" required></div>
+                    <button type="submit" class="btn btn-primary" style="width:100%">Add Expense</button>
+                </form>
+            `;
+            document.getElementById('generic-modal').classList.add('open');
+        }
+        function handleAddExpense(e) {
+            e.preventDefault();
+            state.expenses.push({ id: Date.now().toString(), date: e.target.date.value, category: e.target.category.value, desc: e.target.desc.value, amount: parseFloat(e.target.amount.value) });
+            saveState(); closeModal('generic-modal');
+        }
+        function deleteExpense(id) { if(confirm('Delete?')) { state.expenses = state.expenses.filter(e => e.id !== id); saveState(); } }
+
+        function openPaymentModal() {
+            const opts = state.members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+            document.getElementById('modal-title').innerText = "Record Payment";
+            document.getElementById('modal-body').innerHTML = `
+                <form onsubmit="handleAddPayment(event)">
+                    <div class="form-group"><label class="form-label">Member</label><select name="memberId" class="form-select">${opts}</select></div>
+                    <div class="form-group"><label class="form-label">Amount</label><input type="number" name="amount" step="0.01" class="form-input" required></div>
+                    <div class="form-group"><label class="form-label">Date</label><input type="date" name="date" class="form-input" required value="${new Date().toISOString().split('T')[0]}"></div>
+                    <button type="submit" class="btn btn-primary" style="width:100%">Save Payment</button>
+                </form>
+            `;
+            document.getElementById('generic-modal').classList.add('open');
+        }
+        function handleAddPayment(e) {
+            e.preventDefault();
+            state.payments.push({ id: Date.now().toString(), memberId: e.target.memberId.value, amount: parseFloat(e.target.amount.value), date: e.target.date.value });
+            saveState(); closeModal('generic-modal');
+        }
+        function deletePayment(id) { if(confirm('Delete?')) { state.payments = state.payments.filter(p => p.id !== id); saveState(); } }
+
+        // --- Initialization ---
+
+        function updateRoleSelect() {
+            const sel = document.getElementById('role-select');
+            sel.innerHTML = '<option value="manager">Manager</option><option value="" disabled>-- Select Member --</option>';
+            state.members.forEach(m => {
+                sel.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+            });
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('active');
+        }
+
+        updateRoleSelect();
+        render();
+
+    </script>
+</body>
+</html>
